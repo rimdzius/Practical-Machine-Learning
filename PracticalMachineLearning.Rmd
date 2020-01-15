@@ -1,0 +1,129 @@
+---
+title: "Practical Machine Learning"
+author: "Daniel Rimdzius"
+date: "1/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+set.seed(123)
+```
+
+# Overview
+
+This is the final course project for Johns Hopkins Practical Machine Learning Course. It uses accelerometer data from six participants who were asked to perform barbell lifts correct and incorrectly in five different ways. I will download and clean the data, and train a few models to find the most accurate model, which turns out to be the Random Forest model. That will then be used on the test data and the answers submitted as part of the final quiz.
+
+# Data Processing and Exploratory Analysis
+
+I start with loading the data into R, and doing some preprocessing and exploratory analysis
+```{r DATA}
+require(dplyr)
+require(caret)
+require(ggplot2)
+require(rapportools)
+require(rattle)
+require(rpart)
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+dim(training)
+```  
+
+The training set is `r ncol(training)` observations of `r nrow(training)` variables. There's a bit to learn just looking at the str() and summary() of the data. These have been omitted for now, as the `r nrow(training)` variables causes quite a lot of text.
+
+```{r TABLE}
+table <- data.frame("variable" = names(training),
+                    "empty" = colSums(apply(is.empty(training), 2, as.numeric)),
+                    row.names = NULL)
+table %>% arrange(desc(empty)) %>% head()
+table %>% arrange(desc(empty)) %>% 
+      ggplot(aes(x=1:160, y=empty)) + 
+      geom_point() +
+      geom_hline(yintercept = nrow(training), col = "red") +
+      labs(x = "Variable Row Number, Sorted", 
+           y = "Number of Empty/NA/NaN Values", 
+           title = "Number of Empty/NA/NaN Values in Each Variable")
+```  
+
+Using is.empty() from rapportools prackage, I see that there is a lot of empty/NA/NaN values in these data. I've created a table showing the number of "NA", "NaN", empty vectors, etc. in each variable. We can also clearly see in this plot that a little under half of the variables have very little data stored in them, accounting for only `r round(max(table$empty)/nrow(training)*100,2)`% of the data. I will ignore/remove this data from the model, as with such a low population, there's no certainty on how it will predict a value.
+
+```{r DATA_SETS}
+training_sub <- training %>% select(as.character(table[table$empty < 19000,]$variable)) %>% select(-c(1:7))
+near_zero_variance <- nearZeroVar(training_sub)
+training_clean <- training_sub %>% select(-c(near_zero_variance))
+
+partition <- createDataPartition(training_clean$classe, p=0.75, list=FALSE)
+train_set <- training_clean[partition,]
+validation_set <- training_clean[-partition,]
+test_set <- testing %>% select(as.character(table[table$empty < 19000 & table$variable != "classe",]$variable)) %>%
+            select(-c(names(training_sub[,near_zero_variance])))
+data.frame("Training" = dim(train_set),"Validation" = dim(validation_set),"Testing" = dim(test_set), row.names = c("Observations","Variables"))
+```
+
+In the code above, I filtered out the empty variables, and then ran a near zero variance on the result to determine if I could further remove any additional variables with excess information. A training set and validation set were created from the original training data, and the size of each set is displayed above.
+
+# Modeling
+
+I will use two different models, classification tree and random forest, as well as a generalized boosted model.
+
+## Classification Tree
+
+I will start with the classification tree model. The classification tree dendrogram is shown below.
+```{r CT}
+model_CT <- rpart(classe ~ ., train_set, method = "class")
+fancyRpartPlot(model_CT)
+```
+
+I can test the validation set against this model:
+
+```{r CT_PRED}
+predict_CT <- predict(model_CT, validation_set, type = "class")
+matrix_CT <- confusionMatrix(predict_CT, validation_set$classe)
+matrix_CT$overall
+```
+
+We see that the accuracy is roughly `r round(matrix_CT$overal[[1]]*100,1)`%, which is better than just randomly guessing, but doesn't offer a lot more than that.
+
+## Random Forest
+
+The next model will be utilizing random forest. I create the model below and show the summary.
+
+```{r RF}
+model_RF <- train(classe ~ ., train_set, method = "rf", trControl = trainControl(method = "cv", number = 5, verbose = FALSE))
+model_RF$finalModel
+ggplot(model_RF) + labs(title = "Accuracy of Random Forest Model by Number of Predictors")
+```
+
+As before, I then use the validation set against this model to test its accuracy:
+```{r RF_PRED}
+predict_RF <- predict(model_RF, validation_set)
+matrix_RF <- confusionMatrix(predict_RF, validation_set$classe)
+matrix_RF
+```
+
+We can see we are at a `r matrix_RF$overal[[1]]*100`% accuracy level with this test, with a very tight 95% confidence interval. Per the graph above, we can see that the max number of predictors one would want to use is around 27, as the accuracy of the model begins to fall after that, likely due to dependencies in the variables.
+
+## Stochastic Gradient Boosting
+
+Finally, I will look at a boosted model for this data.
+
+```{r GBM}
+model_GBM <- train(classe ~ ., train_set, method = "gbm", trControl = trainControl(method = "cv", number = 5), verbose = FALSE)
+model_GBM
+ggplot(model_GBM)
+```
+
+```{r GBM_PRED}
+predict_GBM <- predict(model_GBM, validation_set)
+matrix_GBM <- confusionMatrix(predict_GBM, validation_set$classe)
+matrix_GBM
+```
+
+Again, running the validation set through this model, we see around a `r matrix_GBM$overal[[1]]*100`% accuracy, which is not quite as high as the random forest model.
+
+# Conclusion
+
+I've shown that the Random Forest model is the best predictor out of these three models for this data set, with a `r matrix_RF$overal[[1]]*100`% accuracy level. For the final test data, the predictions are given below.
+```{r}
+predict(model_RF, test_set)
+```
