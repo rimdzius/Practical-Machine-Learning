@@ -2,7 +2,9 @@
 title: "Practical Machine Learning"
 author: "Daniel Rimdzius"
 date: "1/15/2020"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -102,6 +104,9 @@ matrix_RF
 ```
 
 We can see we are at a `r matrix_RF$overal[[1]]*100`% accuracy level with this test, with a very tight 95% confidence interval. Per the graph above, we can see that the max number of predictors one would want to use is around 27, as the accuracy of the model begins to fall after that, likely due to dependencies in the variables.
+
+Since I am using a **separate validation set** for testing, I can simply calculate the **out-of-sample error rate** as (1-`r matrix_RF$overal[[1]]`) * 100 = `r (1-matrix_RF$overal[[1]])*100`%.
+
 
 ## Stochastic Gradient Boosting
 
